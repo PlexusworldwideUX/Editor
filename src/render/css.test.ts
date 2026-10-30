@@ -3,7 +3,7 @@ import { nodeCss } from './css'
 import { effLayout } from '../model/tree'
 import type { DesignNode } from '../model/types'
 
-const res = { radius: () => undefined, shadow: () => undefined }
+const res = { radius: () => undefined, shadow: () => undefined, byMode: (l: string) => l }
 const node = (layout: DesignNode['layout']): DesignNode => ({ id: 'n', type: 'container', layout })
 
 it('tablet and desktop each follow mobile, never each other', () => {
@@ -43,4 +43,12 @@ it('auto on either gap spreads items or wrapped lines', () => {
   const col = nodeCss(node({ base: { direction: 'column', gapY: 'auto' } }), undefined, res)
   expect(col).toMatchObject({ justifyContent: 'space-between' })
   expect(col.alignContent).toBeUndefined()
+})
+
+it('Light and Dark fills become a mode-aware value, and the same fill stays a plain token', () => {
+  const r = { radius: () => undefined, shadow: () => undefined, byMode: (l: string, d: string) => `${l}|${d}` }
+  const n = (style: DesignNode['style']): DesignNode => ({ id: 'n', type: 'container', layout: { base: {} }, style })
+  expect(nodeCss(n({ fill: 'background.paper', fillDark: 'custom.dialog' }), undefined, r).backgroundColor).toBe('background.paper|custom.dialog')
+  expect(nodeCss(n({ fill: 'background.paper' }), undefined, r).backgroundColor).toBe('background.paper')
+  expect(nodeCss(n({ fill: 'background.paper', fillDark: 'background.paper' }), undefined, r).backgroundColor).toBe('background.paper')
 })

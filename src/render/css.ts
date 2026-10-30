@@ -1,6 +1,6 @@
 import { toCss } from '../model/rem'
 import { effLayout } from '../model/tree'
-import { BREAKPOINT_REM, type Align3, type DesignNode, type LayoutProps, type Sizing } from '../model/types'
+import { BREAKPOINT_REM, type Align3, type DesignNode, type LayoutProps, type NodeState, type NodeStyle, type Sizing } from '../model/types'
 
 type Css = Record<string, string>
 const J: Record<Align3, string> = { start: 'flex-start', center: 'center', end: 'flex-end' }
@@ -58,8 +58,10 @@ const DEFAULTS: Css = {
   columnGap: '0', rowGap: '0', alignContent: 'normal', padding: '0', overflow: 'visible', flexWrap: 'nowrap',
 }
 
-export interface Resolver { radius: (token: string) => string | undefined; shadow: (token: string, drop: boolean) => string | undefined }
+/** `byMode` returns a value that picks light or dark from the active MUI theme (a function in sx; the same function in exported code). */
+export interface Resolver { radius: (token: string) => string | undefined; shadow: (token: string, drop: boolean) => string | undefined; byMode: (light: string, dark: string) => unknown }
 export const MARK = {
+  byMode: (l: string, d: string) => `@@(theme: Theme) => (theme.palette.mode === 'dark' ? ${JSON.stringify(d)} : ${JSON.stringify(l)})@@`,
   radius: (t: string) => `@@tokens.radius[${JSON.stringify(t)}]@@`,
   shadow: (t: string, drop: boolean) => `@@tokens.${drop ? 'dropShadow' : 'shadow'}[${JSON.stringify(t)}]@@`,
 }
@@ -80,19 +82,44 @@ export function nodeCss(n: DesignNode, parent: DesignNode | undefined, r: Resolv
     if (Object.keys(diff).length) out[`@container (min-width: ${BREAKPOINT_REM[bp]}rem)`] = diff
     prev = cur
   }
-  const s = n.style
-  if (s?.fill) out.backgroundColor = s.fill
-  if (s?.color) out.color = s.color
-  if (s?.radius) out.borderRadius = r.radius(s.radius)
-  if (s?.shadow) {
+  Object.assign(out, styleCss(n, n.style, n.style, r))
+  // states come last so they win over the base look
+  for (const st of n.states ?? []) {
+    const css = styleCss(n, st.style, { ...n.style, ...st.style }, r, true)
+    if (Object.keys(css).length) out[STATE_SELECTOR(st)] = css
+  }
+  return out
+}
+
+export const STATE_SELECTOR = (st: NodeState) =>
+  st.kind === 'hover' ? '&:hover'
+    : st.kind === 'pressed' ? '&:active'
+      : st.kind === 'focus' ? '&:focus-visible, &.Mui-focusVisible'
+        : st.kind === 'disabled' ? '&:disabled, &.Mui-disabled, &[aria-disabled="true"]'
+          : `&[data-state="${st.id}"]`
+
+/** Style tokens to CSS. `own` is what this style sets; `merged` is the effective style (used to decide fill vs drop shadow). */
+export function styleCss(n: DesignNode, own: NodeStyle | undefined, merged: NodeStyle | undefined, r: Resolver, isState = false): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  if (!own) return out
+  const pick = (light: string | undefined, dark: string | undefined, fallback?: string) =>
+    light || dark ? (dark && dark !== (light ?? fallback) ? r.byMode(light ?? fallback ?? dark, dark) : (light ?? dark)) : undefined
+  const fill = pick(own.fill, own.fillDark, merged?.fill)
+  if (fill) out.backgroundColor = fill
+  const text = pick(own.color, own.colorDark, merged?.color)
+  if (text) out.color = text
+  if (own.radius) out.borderRadius = r.radius(own.radius)
+  if (own.opacity !== undefined) out.opacity = own.opacity
+  if (own.shadow) {
     // box-shadow only paints outside the box, so unfilled nodes use a filter that follows their content
-    const filled = !!s.fill || (n.type === 'button' && n.props?.variant !== 'text')
-    if (filled) out.boxShadow = r.shadow(s.shadow, false)
-    else out.filter = r.shadow(s.shadow, true)
+    const filled = !!merged?.fill || (n.type === 'button' && n.props?.variant !== 'text')
+    if (filled) out.boxShadow = r.shadow(own.shadow, false)
+    else out.filter = r.shadow(own.shadow, true)
   }
-  if (s?.borderWidth) {
-    out.border = `${toCss(s.borderWidth)} solid`
-    out.borderColor = s.borderColor ?? 'divider'
-  }
+  if (own.borderWidth !== undefined || (isState && own.borderColor)) {
+    const w = merged?.borderWidth ?? own.borderWidth
+    if (own.borderWidth !== undefined) out.border = `${w ? toCss(w) : '0'} solid`
+    out.borderColor = pick(merged?.borderColor ?? 'divider', merged?.borderColorDark) ?? 'divider'
+  } else if ((own.borderColor || own.borderColorDark) && merged?.borderWidth) out.borderColor = pick(own.borderColor, own.borderColorDark, merged?.borderColor ?? 'divider')
   return out
 }

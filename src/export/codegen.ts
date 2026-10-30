@@ -1,7 +1,7 @@
 import JSZip from 'jszip'
 import { nodeCss, MARK } from '../render/css'
 import { toCss } from '../model/rem'
-import { STD_VARIANTS, dropShadowValue, fontCss, isTheme, shadowValue, themeOptions, type Theme } from '../model/theme'
+import { STD_VARIANTS, buttonStyleOf, dropShadowValue, fontCss, isTheme, shadowValue, textCss, themeOptions, type Theme } from '../model/theme'
 import { walk } from '../model/tree'
 import { BREAKPOINT_REM, type DesignNode, type LibraryItem } from '../model/types'
 import { validate } from '../model/validate'
@@ -27,7 +27,7 @@ function lit(v: unknown, ind: number): string {
 interface Used { icons: Set<string>; items: Set<string>; mui: Set<string>; radius: boolean; assets: Set<string> }
 type Lib = Map<string, { item: LibraryItem; comp: string }>
 /** data: URLs become real files in the package; other URLs are written as plain strings. */
-interface Assets { byData: Map<string, { name: string; data: string }> }
+interface Assets { byData: Map<string, { name: string; data: string }>; theme: Theme }
 const iconImport = (name: string) => `${name}Icon`
 const EXT: Record<string, string> = { 'image/svg+xml': 'svg', 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' }
 
@@ -45,7 +45,7 @@ function asset(src: string, assets: Assets, used: Used): string {
 
 function jsx(n: DesignNode, parent: DesignNode | undefined, lib: Lib, used: Used, assets: Assets, ind: number, isRoot: boolean): string {
   const pad = '  '.repeat(ind)
-  const css = nodeCss(n, parent, { radius: MARK.radius, shadow: MARK.shadow })
+  const css = nodeCss(n, parent, { radius: MARK.radius, shadow: MARK.shadow, byMode: MARK.byMode })
   if (JSON.stringify(css).includes('@@')) used.radius = true
   const merged = (c: unknown) => (isRoot ? `{[${lit(c, ind)}, ...(Array.isArray(sx) ? sx : [sx])]}` : `{${lit(c, ind)}}`)
   const p = n.props ?? {}
@@ -53,63 +53,69 @@ function jsx(n: DesignNode, parent: DesignNode | undefined, lib: Lib, used: Used
   const text = str('text')
   const label = isRoot ? `{text ?? ${text}}` : `{${text}}`
   const use = (c: string) => { used.mui.add(c) }
+  // states: custom states switch on data-state; disabled maps to aria-disabled (MUI Button gets the real disabled prop)
+  const isBtn = n.type === 'button'
+  const attrs = isRoot
+    ? ` data-state={state}${isBtn ? ' disabled={disabled}' : ' aria-disabled={disabled || undefined}'}`
+    : `${typeof p.state === 'string' && p.state ? ` data-state=${JSON.stringify(p.state)}` : ''}${p.disabled ? (isBtn ? ' disabled' : ' aria-disabled') : ''}`
   switch (n.type) {
     case 'instance': {
       const e = lib.get(n.ref ?? '')
       if (!e) return `${pad}{/* missing library item */}`
       used.items.add(e.item.id)
       const t = typeof p.text === 'string' ? ` text=${JSON.stringify(p.text)}` : ''
-      return `${pad}<${e.comp} sx={${lit(css, ind)}}${t} />`
+      const st = typeof p.state === 'string' && p.state ? ` state=${JSON.stringify(p.state)}` : ''
+      return `${pad}<${e.comp} sx={${lit(css, ind)}}${t}${st}${p.disabled ? ' disabled' : ''} />`
     }
     case 'text':
       use('Typography')
-      return `${pad}<Typography variant="${p.variant ?? 'body1'}" sx=${merged(css)}>${label}</Typography>`
+      return `${pad}<Typography variant="${p.variant ?? 'body1'}"${attrs} sx=${merged(css)}>${label}</Typography>`
     case 'button': {
       use('Button')
       let start = ''
       if (p.icon) { used.icons.add(String(p.icon)); start = ` startIcon={<${iconImport(String(p.icon))} />}` }
-      return `${pad}<Button variant="${p.variant ?? 'contained'}" color="${p.color ?? 'primary'}" size="${p.size ?? 'medium'}"${start} sx=${merged(css)}>${label}</Button>`
+      return `${pad}<Button variant="${buttonStyleOf(assets.theme, p).id}" size="${p.size ?? 'medium'}"${start}${attrs} sx=${merged(css)}>${label}</Button>`
     }
     case 'icon': {
       const name = String(p.icon ?? 'Home')
       used.icons.add(name)
-      return `${pad}<${iconImport(name)} sx=${merged({ ...css, fontSize: toCss(Number(p.size ?? 3000)) })} />`
+      return `${pad}<${iconImport(name)}${attrs} sx=${merged({ ...css, fontSize: toCss(Number(p.size ?? 3000)) })} />`
     }
     case 'image': {
       use('Box')
       const src = asset(String(p.src ?? ''), assets, used)
-      return `${pad}<Box sx=${merged({ ...css, overflow: 'hidden' })}>\n${pad}  <Box component="img" src={${src}} alt=${str('alt')} sx={{ display: 'block', width: '100%', height: '100%', objectFit: ${str('fit', 'cover')} }} />\n${pad}</Box>`
+      return `${pad}<Box${attrs} sx=${merged({ ...css, overflow: 'hidden' })}>\n${pad}  <Box component="img" src={${src}} alt=${str('alt')} sx={{ display: 'block', width: '100%', height: '100%', objectFit: ${str('fit', 'cover')} }} />\n${pad}</Box>`
     }
     case 'input': {
       use('TextField')
       const opt = (k: string, attr: string) => (String(p[k] ?? '') ? ` ${attr}=${str(k)}` : '')
-      return `${pad}<TextField${opt('label', 'label')}${opt('placeholder', 'placeholder')}${opt('helper', 'helperText')} variant="${p.variant ?? 'outlined'}" size="${p.size ?? 'medium'}" type="${p.type ?? 'text'}" sx=${merged(css)} />`
+      return `${pad}<TextField${opt('label', 'label')}${opt('placeholder', 'placeholder')}${opt('helper', 'helperText')} variant="${p.variant ?? 'outlined'}" size="${p.size ?? 'medium'}" type="${p.type ?? 'text'}"${attrs} sx=${merged(css)} />`
     }
     case 'checkbox':
     case 'switch': {
       const C = n.type === 'checkbox' ? 'Checkbox' : 'Switch'
       use('FormControlLabel'); use(C)
-      return `${pad}<FormControlLabel label=${str('label')} control={<${C} defaultChecked={${!!p.checked}} color="${p.color ?? 'primary'}" />} sx=${merged(css)} />`
+      return `${pad}<FormControlLabel label=${str('label')} control={<${C} defaultChecked={${!!p.checked}} color="${p.color ?? 'primary'}" />}${attrs} sx=${merged(css)} />`
     }
     case 'chip': {
       use('Chip')
       let icon = ''
       if (p.icon) { used.icons.add(String(p.icon)); icon = ` icon={<${iconImport(String(p.icon))} />}` }
-      return `${pad}<Chip label=${str('label')} variant="${p.variant ?? 'filled'}" color="${p.color ?? 'default'}" size="${p.size ?? 'medium'}"${icon} sx=${merged(css)} />`
+      return `${pad}<Chip label=${str('label')} variant="${p.variant ?? 'filled'}" color="${p.color ?? 'default'}" size="${p.size ?? 'medium'}"${icon}${attrs} sx=${merged(css)} />`
     }
     case 'avatar': {
       use('Avatar')
       const size = toCss(Number(p.size ?? 5000))
       const src = p.src ? ` src={${asset(String(p.src), assets, used)}}` : ''
-      return `${pad}<Avatar${src} sx=${merged({ ...css, width: size, height: size })}>${isRoot ? `{text ?? ${text}}` : `{${text}}`}</Avatar>`
+      return `${pad}<Avatar${src}${attrs} sx=${merged({ ...css, width: size, height: size })}>${isRoot ? `{text ?? ${text}}` : `{${text}}`}</Avatar>`
     }
     case 'link':
       use('Link')
-      return `${pad}<Link href=${str('href', '#')} variant="${p.variant ?? 'body1'}" underline="${p.underline ?? 'hover'}" sx=${merged(css)}>${label}</Link>`
+      return `${pad}<Link href=${str('href', '#')} variant="${p.variant ?? 'body1'}" underline="${p.underline ?? 'hover'}"${attrs} sx=${merged(css)}>${label}</Link>`
     default: {
       use('Box')
       const kids = (n.children ?? []).map((c) => jsx(c, n, lib, used, assets, ind + 1, false)).join('\n')
-      return kids ? `${pad}<Box sx=${merged(css)}>\n${kids}\n${pad}</Box>` : `${pad}<Box sx=${merged(css)} />`
+      return kids ? `${pad}<Box${attrs} sx=${merged(css)}>\n${kids}\n${pad}</Box>` : `${pad}<Box${attrs} sx=${merged(css)} />`
     }
   }
 }
@@ -124,7 +130,9 @@ function fileFor(name: string, root: DesignNode, lib: Lib, assets: Assets, page:
   for (const id of used.items) { const e = lib.get(id)!; imp.push(`import { ${e.comp} } from '${page ? '../library/' : './'}${e.comp}'`) }
   if (used.radius) imp.push(`import * as tokens from '../theme/tokens'`)
   const hasText = root.type === 'text' || root.type === 'button' || root.type === 'link' || root.type === 'avatar'
-  const props = `{ sx${hasText ? ', text' : ''} }: { sx?: SxProps<Theme>${hasText ? '; text?: string' : ''} }`
+  const customStates = (root.states ?? []).filter((x) => x.kind === 'custom').map((x) => JSON.stringify(x.id))
+  const stateType = customStates.length ? customStates.join(' | ') : 'string'
+  const props = `{ sx, state, disabled${hasText ? ', text' : ''} }: { sx?: SxProps<Theme>; state?: ${stateType}; disabled?: boolean${hasText ? '; text?: string' : ''} }`
   return `${imp.join('\n')}\n\nexport function ${name}(${props}) {\n  return (\n${body}\n  )\n}\n`
 }
 
@@ -143,7 +151,10 @@ export const shadow = ${lit(Object.fromEntries(t.shadows.map((x) => [x.id, shado
 
 export const dropShadow = ${lit(Object.fromEntries(t.shadows.map((x) => [x.id, dropShadowValue(t, x.id)])), 0)} as const
 
-export const text = ${lit(Object.fromEntries(t.text.map((x) => [x.id, { fontSize: toCss(x.size), fontWeight: x.weight, lineHeight: x.lineHeight, letterSpacing: toCss(x.letterSpacing) }])), 0)} as const
+export const text = ${lit(Object.fromEntries(t.text.map((x) => [x.id, textCss(t, x)])), 0)} as const
+
+/** Tone scale (50 to 950) of every colour. */
+export const tones = ${lit(Object.fromEntries(t.colors.filter((c) => c.tones).map((c) => [c.id, c.tones])), 0)} as const
 
 /** Min-widths (rem) used by the responsive container queries. */
 export const breakpoints = { mobile: 0, tablet: ${BREAKPOINT_REM.tablet}, desktop: ${BREAKPOINT_REM.desktop} } as const
@@ -156,14 +167,19 @@ export const colors = ${lit({ light: byMode('light'), dark: byMode('dark') }, 0)
 function typesSource(t: Theme) {
   const custom = t.text.filter((x) => !(STD_VARIANTS as readonly string[]).includes(x.id)).map((x) => x.id)
   const colors = t.colors.filter((c) => !c.core).map((c) => c.id)
+  const styles = t.buttons.styles.map((b) => `${b.id}: true`).join('; ')
   return `import '@mui/material/styles'
 import '@mui/material/Typography'
+import '@mui/material/Button'
 
 declare module '@mui/material/styles' {
   interface Palette { custom: { ${colors.map((c) => `${c}: string`).join('; ')} } }
   interface PaletteOptions { custom?: { ${colors.map((c) => `${c}: string`).join('; ')} } }
   interface TypographyVariants { ${custom.map((c) => `${c}: React.CSSProperties`).join('; ')} }
   interface TypographyVariantsOptions { ${custom.map((c) => `${c}?: React.CSSProperties`).join('; ')} }
+}
+declare module '@mui/material/Button' {
+  interface ButtonPropsVariantOverrides { ${styles} }
 }
 declare module '@mui/material/Typography' {
   interface TypographyPropsVariantOverrides { ${custom.map((c) => `${c}: true`).join('; ')} }
@@ -240,7 +256,7 @@ export async function buildExport(i: ExportInput): Promise<{ zip?: Blob; errors:
   }
 
   const zip = new JSZip()
-  const assets: Assets = { byData: new Map() }
+  const assets: Assets = { byData: new Map(), theme: i.theme }
   zip.file('src/design/Page.tsx', fileFor('Page', i.page, lib, assets, true))
   for (const { item, comp } of lib.values()) zip.file(`src/library/${comp}.tsx`, fileFor(comp, item.root, lib, assets, false))
   for (const a of assets.byData.values()) {

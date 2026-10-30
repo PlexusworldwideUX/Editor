@@ -49,3 +49,54 @@ it('theme file round-trips', () => {
   const t = defaultTheme()
   expect(parseThemeFile(themeFileSource(t, true))).toEqual(t)
 })
+
+it('exports items with states as real CSS and component props', async () => {
+  const theme = defaultTheme()
+  theme.buttons.styles.push({ ...theme.buttons.styles[0], id: 'danger', name: 'Danger', colorId: 'error' })
+  const toggle: LibraryItem = {
+    id: 'tg', name: 'Toggle button', kind: 'element', tier: 'designer',
+    root: {
+      id: 'r', type: 'button', props: { text: 'Toggle', variant: 'outlined', color: 'primary', size: 'medium' }, layout: { base: {} },
+      style: { fill: 'background.paper' },
+      states: [
+        { id: 'hover', name: 'Hover', kind: 'hover', style: { fill: 'divider', shadow: 'md' } },
+        { id: 'pressed', name: 'Pressed', kind: 'pressed', style: { fill: 'divider' } },
+        { id: 'focus', name: 'Focused', kind: 'focus', style: { borderWidth: 250, borderColor: 'primary.main' } },
+        { id: 'disabled', name: 'Disabled', kind: 'disabled', style: { opacity: 0.4 } },
+        { id: 'selected', name: 'Selected', kind: 'custom', style: { fill: 'background.default', borderWidth: 250, borderColor: 'primary.main' } },
+      ],
+    },
+  }
+  const page: DesignNode = {
+    id: 'p', type: 'container', layout: { base: { direction: 'column', width: { mode: 'fill' } } },
+    children: [
+      { id: 'a', type: 'instance', ref: 'tg', props: { state: 'selected' }, layout: { base: {} } },
+      { id: 'b', type: 'instance', ref: 'tg', props: { disabled: true }, layout: { base: {} } },
+      { id: 'bb', type: 'button', props: { text: 'Go', buttonStyle: 'danger', size: 'medium' }, layout: { base: {} }, style: { fill: 'background.paper', fillDark: 'custom.dialog' } },
+      { id: 'c', type: 'container', props: { state: 'x' }, layout: { base: {} }, states: [{ id: 'x', name: 'X', kind: 'custom', style: { opacity: 0.5 } }] },
+    ],
+  }
+  const r = await buildExport({ page, library: [toggle], themes: [theme], theme })
+  expect(r.errors).toEqual([])
+  const zip = await JSZip.loadAsync(await r.zip!.arrayBuffer())
+  const lib = await zip.files['src/library/ToggleButton.tsx'].async('string')
+  expect(lib).toContain('"&:hover"')
+  expect(lib).toContain('"&:active"')
+  expect(lib).toContain('"&:focus-visible, &.Mui-focusVisible"')
+  expect(lib).toContain('"&:disabled, &.Mui-disabled, &[aria-disabled=\\"true\\"]"')
+  expect(lib).toContain('"&[data-state=\\"selected\\"]"')
+  expect(lib).toContain('state?: "selected"')
+  expect(lib).toContain('disabled={disabled}')
+  expect(lib).toContain('data-state={state}')
+  const pg = await zip.files['src/design/Page.tsx'].async('string')
+  expect(pg).toContain('state="selected"')
+  expect(pg).toMatch(/<ToggleButton[^>]* disabled/)
+  expect(pg).toContain('data-state="x"')
+  expect(pg).toContain('variant="danger"')
+  expect(pg).toContain('(theme: Theme) => (theme.palette.mode === ' + "'dark'" + ' ? ' + JSON.stringify('custom.dialog') + ' : ' + JSON.stringify('background.paper') + ')')
+  expect(await zip.files['src/theme/theme-types.d.ts'].async('string')).toContain('ButtonPropsVariantOverrides')
+  for (const n of ['src/design/Page.tsx', 'src/library/ToggleButton.tsx', 'src/theme/tokens.ts', 'src/theme/theme.ts', 'src/theme/theme-types.d.ts']) {
+    mkdirSync(dirname(`src/__exported__/${n}`), { recursive: true })
+    writeFileSync(`src/__exported__/${n}`, await zip.files[n].async('string'))
+  }
+})

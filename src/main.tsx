@@ -38,6 +38,7 @@ function Canvas() {
   const theme = useStore(getTheme)
   const library = useStore((s) => s.library)
   const selection = useStore((s) => s.selection)
+  const editState = useStore((s) => s.editState)
   const bp = useStore((s) => s.bp)
   const mode = useStore((s) => s.mode)
   const view = useStore((s) => s.view)
@@ -54,7 +55,7 @@ function Canvas() {
     return () => ro.disconnect()
   }, [])
   const zoom = view === 'theme' || !avail ? 1 : Math.min(1, (avail - 48) / DEVICE_PX[bp])
-  const ctx = useMemo(() => ({ theme, library, editor: { selection, onSelect: select } }), [theme, library, selection])
+  const ctx = useMemo(() => ({ theme, library, editor: { selection, onSelect: select, editState } }), [theme, library, selection, editState])
   return (
     <ThemeProvider theme={muiTheme}>
       <Box ref={area} onClick={() => select(null)} sx={{ flex: 1, overflow: 'auto', bgcolor: '#e8eaed', p: 3, position: 'relative' }}>
@@ -125,7 +126,7 @@ function App() {
       <Box sx={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <LeftPanel />
         <Canvas />
-        <Box sx={{ width: '23rem', borderLeft: '0.0625rem solid', borderColor: 'divider', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper' }}>
+        <Box sx={{ width: '28rem', borderLeft: '0.0625rem solid', borderColor: 'divider', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper' }}>
           {view === 'theme' ? <ThemePanel /> : <Properties />}
         </Box>
       </Box>

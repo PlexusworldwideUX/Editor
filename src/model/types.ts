@@ -42,11 +42,24 @@ export type Tier = 'out-of-box' | 'designer'
 export interface NodeStyle {
   fill?: string
   color?: string
+  /** Dark-mode values. When unset, Dark uses the same token as Light. */
+  fillDark?: string
+  colorDark?: string
+  borderColorDark?: string
   radius?: string
   shadow?: string
   borderWidth?: Ticks
   borderColor?: string
+  opacity?: number
 }
+
+/** hover/pressed/focus/disabled map to CSS pseudo-classes; custom states are switched by a `state` value (data-state). */
+export type StateKind = 'hover' | 'pressed' | 'focus' | 'disabled' | 'custom'
+export const STATE_KINDS: { kind: StateKind; label: string }[] = [
+  { kind: 'hover', label: 'Hover' }, { kind: 'pressed', label: 'Pressed' }, { kind: 'focus', label: 'Focused' },
+  { kind: 'disabled', label: 'Disabled' }, { kind: 'custom', label: 'Custom (switched by a state value)' },
+]
+export interface NodeState { id: string; name: string; kind: StateKind; style: NodeStyle }
 
 export interface DesignNode {
   id: string
@@ -58,6 +71,8 @@ export interface DesignNode {
   layout: { base: LayoutProps } & Partial<Record<Exclude<Breakpoint, 'mobile'>, LayoutProps>>
   props?: Record<string, string | number | boolean>
   style?: NodeStyle
+  /** Looks this node takes in a given state. */
+  states?: NodeState[]
   children?: DesignNode[]
 }
 

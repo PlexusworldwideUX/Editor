@@ -14,10 +14,12 @@ import Typography from '@mui/material/Typography'
 import Alert from '@mui/material/Alert'
 import { find } from '../model/tree'
 import { effLayout, isOverridden } from '../model/tree'
-import { colorPath } from '../model/theme'
-import { KINDS, type DesignNode, type Kind, type LayoutKey } from '../model/types'
-import { deleteNodes, duplicateNodes, editDefinition, getRoot, getTheme, primary, resetLayoutProp, saveAsNew, setLayoutProp, ungroup, updateNode, useStore, wrapNodes } from '../store'
+import { buttonStyleOf, colorPath } from '../model/theme'
+import { KINDS, STATE_KINDS, type DesignNode, type Kind, type LayoutKey, type NodeStyle, type StateKind } from '../model/types'
+import { setView, addNodeState, deleteNodes, deleteNodeState, duplicateNodes, editDefinition, getRoot, getTheme, primary, resetLayoutProp, saveAsNew, setEditState, setLayoutProp, ungroup, updateNode, updateNodeState, useStore, wrapNodes } from '../store'
 import { AlignMatrix, RemField, Section, SizingField, SwatchSelect, type Swatch } from './Fields'
+import LightMode from '@mui/icons-material/LightMode'
+import DarkMode from '@mui/icons-material/DarkMode'
 import ToggleButton from '@mui/material/ToggleButton'
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import FormatAlignLeft from '@mui/icons-material/FormatAlignLeft'
@@ -59,6 +61,55 @@ function SaveAs({ node, onClose }: { node: DesignNode; onClose: () => void }) {
   )
 }
 
+/** One colour token chosen for Light and for Dark, each labelled and showing that mode's actual colour. */
+function ModeColours({ what, note, light, dark, onLight, onDark, list, sw, noLight }: {
+  what: string; note?: string; light: string; dark: string; onLight: (v: string) => void; onDark: (v: string) => void
+  list: import('../model/theme').ColorToken[]; sw: (l: import('../model/theme').ColorToken[], m: 'light' | 'dark') => Swatch[]; noLight?: boolean
+}) {
+  return (
+    <Box>
+      <Typography variant="caption" sx={{ fontWeight: 700 }}>{what}</Typography>{note && <Typography variant="caption" color="text.secondary"> · {note}</Typography>}
+      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, mt: 0.5 }}>
+        <Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.25 }}><LightMode sx={{ fontSize: '0.875rem' }} /><Typography variant="caption" sx={{ fontWeight: 700 }}>LIGHT mode</Typography></Box>
+          <SwatchSelect label={what} allowNone={!noLight} noneLabel="None" value={light} options={sw(list, 'light')} onChange={onLight} />
+        </Box>
+        <Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.25 }}><DarkMode sx={{ fontSize: '0.875rem' }} /><Typography variant="caption" sx={{ fontWeight: 700 }}>DARK mode</Typography></Box>
+          <SwatchSelect label={what} noneLabel="Same as Light" value={dark} options={sw(list, 'dark')} onChange={onDark} />
+        </Box>
+      </Box>
+    </Box>
+  )
+}
+
+function AddState({ node, onClose }: { node: DesignNode; onClose: () => void }) {
+  const have = new Set((node.states ?? []).map((x) => x.kind))
+  const kinds = STATE_KINDS.filter((k) => k.kind === 'custom' || !have.has(k.kind))
+  const [kind, setKind] = useState<StateKind>(kinds[0].kind)
+  const [name, setName] = useState(kinds[0].label.split(' (')[0])
+  const [err, setErr] = useState('')
+  return (
+    <Dialog open onClose={onClose} fullWidth maxWidth="xs">
+      <DialogTitle>Add state</DialogTitle>
+      <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
+        <Typography variant="body2" color="text.secondary">
+          A state is a different look for this item. Hover, pressed, focused and disabled switch on automatically in the exported code. A custom state is switched on by setting the item's state value (for example "selected").
+        </Typography>
+        <TextField select size="small" label="Kind" value={kind} onChange={(e) => { const k = e.target.value as StateKind; setKind(k); setName(STATE_KINDS.find((x) => x.kind === k)!.label.split(' (')[0]) }}>
+          {kinds.map((k) => <MenuItem key={k.kind} value={k.kind}>{k.label}</MenuItem>)}
+        </TextField>
+        <TextField autoFocus size="small" label="Name" value={name} onChange={(e) => setName(e.target.value)} />
+        {err && <Alert severity="error">{err}</Alert>}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="contained" onClick={() => { const e = addNodeState(node.id, name, kind); if (e) setErr(e); else onClose() }}>Add state</Button>
+      </DialogActions>
+    </Dialog>
+  )
+}
+
 export function Properties() {
   const root = useStore(getRoot)
   const selection = useStore((s) => s.selection)
@@ -68,13 +119,14 @@ export function Properties() {
   const library = useStore((s) => s.library)
   const editing = useStore((s) => s.editing)
   const [saving, setSaving] = useState(false)
+  const [addingState, setAddingState] = useState(false)
+  const editState = useStore((s) => s.editState)
   const [picking, setPicking] = useState(false)
   const node = selId ? find(root, selId) : undefined
   const mode = useStore((s) => s.mode)
-  const sw = (list: typeof theme.colors): Swatch[] => list.map((c) => ({ value: colorPath(c), label: c.name, color: c[mode] }))
-  const surfaceSw = sw(theme.colors.filter((c) => c.group === 'surface')) // fills use surfaces only
-  const colourSw = sw(theme.colors.filter((c) => c.group === 'colour')) // text and icon colours
-  const anySw = sw(theme.colors) // borders may use either
+  const sw = (list: typeof theme.colors, m: 'light' | 'dark'): Swatch[] => list.map((c) => ({ value: colorPath(c), label: c.name, color: c[m] }))
+  const surfaces = theme.colors.filter((c) => c.group === 'surface') // fills use surfaces only
+  const colours = theme.colors.filter((c) => c.group === 'colour') // text and icon colours
   const brand: Swatch[] = theme.colors.filter((c) => ['primary', 'secondary', 'error', 'warning', 'info', 'success'].includes(c.id)).map((c) => ({ value: c.id, label: c.name, color: c[mode] }))
   const spaceTokens = theme.spacing.map((t) => ({ name: t.name, value: t.value }))
 
@@ -99,8 +151,13 @@ export function Properties() {
   const p = node.props ?? {}
   const setProp = (k: string, v: string | number | boolean | undefined) =>
     updateNode(node.id, (n) => { const props = { ...n.props }; if (v === undefined || v === '') delete props[k]; else props[k] = v; return { ...n, props } })
-  const setStyle = (k: string, v: string | number | undefined) =>
-    updateNode(node.id, (n) => { const style = { ...n.style } as Record<string, unknown>; if (v === undefined || v === '') delete style[k]; else style[k] = v; return { ...n, style } })
+  const activeState = editState ? node.states?.find((x) => x.id === editState) : undefined
+  const cs = (activeState ? activeState.style : node.style) ?? {}
+  const setStyle = (k: string, v: string | number | undefined) => {
+    const put = (style: NodeStyle | undefined): NodeStyle => { const o: Record<string, unknown> = { ...(style ?? {}) }; if (v === undefined || v === '') delete o[k]; else o[k] = v; return o as NodeStyle }
+    if (activeState) updateNodeState(node.id, activeState.id, (st) => ({ ...st, style: put(st.style) }))
+    else updateNode(node.id, (n) => ({ ...n, style: put(n.style) }))
+  }
   const pad = eff.padding ?? { top: 0, right: 0, bottom: 0, left: 0 }
   const reset = (k: LayoutKey) => over(k) && <Chip size="small"  label={`custom for ${bp}: reset to mobile`} onClick={() => resetLayoutProp(node.id, k)} sx={{ alignSelf: 'flex-start' }} />
 
@@ -120,6 +177,40 @@ export function Properties() {
       {node.type === 'instance' && !item && <Alert severity="warning" sx={{ mt: 1 }}>Library item missing. It was deleted or not imported. Replace it or re-import the project file.</Alert>}
       {editing && node.id === root.id && <Typography variant="caption" color="primary" sx={{ display: 'block', mt: 1 }}>This is the root of the item being edited.</Typography>}
 
+      <Section title="States">
+        <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+          <Chip size="small" label="Default" color={!activeState ? 'primary' : 'default'} onClick={() => setEditState(null)} />
+          {(item ? item.root.states : node.states)?.map((st) => (
+            <Chip key={st.id} size="small" label={st.name} color={activeState?.id === st.id ? 'primary' : 'default'} variant={item ? 'outlined' : 'filled'} onClick={item ? undefined : () => setEditState(st.id)} />
+          ))}
+          {!item && <Chip size="small" variant="outlined" label="+ Add state" onClick={() => setAddingState(true)} />}
+        </Box>
+        {item && <Typography variant="caption" color="text.secondary">States belong to the library item. Use Edit definition to add or change them.</Typography>}
+        {activeState && (
+          <>
+            <Typography variant="caption" color="text.secondary">
+              Editing the {activeState.name} look ({activeState.kind === 'custom' ? 'shown when state is set to this' : `applies on ${activeState.kind}`}). Only Style changes. Anything left as "None" keeps the default look.
+            </Typography>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <TextField size="small" label="State name" value={activeState.name} sx={{ flex: 1 }} onChange={(e) => updateNodeState(node.id, activeState.id, (st) => ({ ...st, name: e.target.value }))} />
+              <Button size="small" color="error" onClick={() => deleteNodeState(node.id, activeState.id)}>Delete</Button>
+            </Box>
+          </>
+        )}
+        {(() => {
+          const defs = (item ? item.root.states : node.states) ?? []
+          const customs = defs.filter((x) => x.kind === 'custom')
+          const canDisable = node.type === 'button' || defs.some((x) => x.kind === 'disabled') || item?.root.type === 'button'
+          return (
+            <>
+              {!!customs.length && <Sel label="Show state" value={String(p.state ?? '')} options={[{ value: '', label: 'Default' }, ...customs.map((x) => ({ value: x.id, label: x.name }))]} onChange={(v) => setProp('state', v)} />}
+              {canDisable && !activeState && <FormControlLabel label="Disabled" control={<Switch size="small" checked={!!p.disabled} onChange={(e) => setProp('disabled', e.target.checked || undefined)} />} />}
+            </>
+          )
+        })()}
+      </Section>
+
+      <Box sx={{ display: activeState ? 'none' : 'block' }}>
       {node.type === 'text' && (
         <Section title="Text">
           <TextField size="small" label="Content" multiline value={String(p.text ?? '')} onChange={(e) => setProp('text', e.target.value)} />
@@ -129,8 +220,10 @@ export function Properties() {
       {node.type === 'button' && (
         <Section title="Button">
           <TextField size="small" label="Label" value={String(p.text ?? '')} onChange={(e) => setProp('text', e.target.value)} />
-          <Sel label="Variant" value={String(p.variant ?? 'contained')} options={['contained', 'outlined', 'text']} onChange={(v) => setProp('variant', v)} />
-          <SwatchSelect label="Colour" allowNone={false} value={String(p.color ?? 'primary')} options={brand} onChange={(v) => setProp('color', v)} />
+          <TextField select size="small" label="Button style" value={buttonStyleOf(theme, p).id} onChange={(e) => { setProp('buttonStyle', e.target.value); setProp('variant', undefined); setProp('color', undefined) }}>
+            {theme.buttons.styles.map((b) => <MenuItem key={b.id} value={b.id}><Box sx={{ display: 'inline-block', width: '0.875rem', height: '0.875rem', borderRadius: 0.5, mr: 1, verticalAlign: 'middle', border: '0.0625rem solid rgba(0,0,0,.25)', bgcolor: theme.colors.find((c) => c.id === b.colorId)?.[mode] }} />{b.name}</MenuItem>)}
+          </TextField>
+          <Button size="small" onClick={() => setView('theme')} sx={{ alignSelf: 'flex-start' }}>Edit button styles and states in Theme</Button>
           <Sel label="Size" value={String(p.size ?? 'medium')} options={['small', 'medium', 'large']} onChange={(v) => setProp('size', v)} />
           <Box sx={{ display: 'flex', gap: 1 }}>
             <Button size="small" variant="outlined" onClick={() => setPicking(true)}>{p.icon ? `Icon: ${iconLabel(String(p.icon))}` : 'Add icon'}</Button>
@@ -282,17 +375,23 @@ export function Properties() {
         </>
       )}
 
-      <Section title="Style (theme tokens)">
+      </Box>
+
+      <Section title={activeState ? `Style: ${activeState.name} state` : "Style (theme tokens)"}>
         {node.type === 'icon'
-          ? <SwatchSelect label="Colour" value={node.style?.color ?? ''} options={colourSw} onChange={(v) => setStyle('color', v)} />
-          : <SwatchSelect label="Fill (surface colours)" value={node.style?.fill ?? ''} options={surfaceSw} onChange={(v) => setStyle('fill', v)} />}
-        {(node.type === 'text' || node.type === 'container' || node.type === 'instance') && <SwatchSelect label="Text colour" value={node.style?.color ?? ''} options={colourSw} onChange={(v) => setStyle('color', v)} />}
-        <Sel label="Radius" value={node.style?.radius ?? ''} options={['', ...theme.radius.map((r) => ({ value: r.id, label: r.name }))]} onChange={(v) => setStyle('radius', v)} />
-        <Sel label="Shadow" value={node.style?.shadow ?? ''} options={['', ...theme.shadows.map((r) => ({ value: r.id, label: r.name }))]} onChange={(v) => setStyle('shadow', v)} />
-        <RemField label="Border width" value={node.style?.borderWidth} placeholder="0.0625" onChange={(v) => setStyle('borderWidth', v)} />
-        {!!node.style?.borderWidth && <SwatchSelect label="Border colour" allowNone={false} value={node.style?.borderColor ?? 'divider'} options={anySw} onChange={(v) => setStyle('borderColor', v)} />}
+          ? <ModeColours what="Colour" light={cs.color ?? ''} dark={cs.colorDark ?? ''} onLight={(v) => setStyle('color', v)} onDark={(v) => setStyle('colorDark', v)} list={colours} sw={sw} />
+          : <ModeColours what="Fill" note="Surface colours only" light={cs.fill ?? ''} dark={cs.fillDark ?? ''} onLight={(v) => setStyle('fill', v)} onDark={(v) => setStyle('fillDark', v)} list={surfaces} sw={sw} />}
+        {(node.type === 'text' || node.type === 'container' || node.type === 'instance') && <ModeColours what="Text colour" light={cs.color ?? ''} dark={cs.colorDark ?? ''} onLight={(v) => setStyle('color', v)} onDark={(v) => setStyle('colorDark', v)} list={colours} sw={sw} />}
+        <Button size="small" onClick={() => setView('theme')} sx={{ alignSelf: 'flex-start' }}>Edit surface and colour values in Theme</Button>
+        <Sel label="Radius" value={cs.radius ?? ''} options={['', ...theme.radius.map((r) => ({ value: r.id, label: r.name }))]} onChange={(v) => setStyle('radius', v)} />
+        <Sel label="Shadow" value={cs.shadow ?? ''} options={['', ...theme.shadows.map((r) => ({ value: r.id, label: r.name }))]} onChange={(v) => setStyle('shadow', v)} />
+        <RemField label="Border width" value={cs.borderWidth} placeholder="0.0625" onChange={(v) => setStyle('borderWidth', v)} />
+        <TextField size="small" label="Opacity (0 to 1)" type="number" value={cs.opacity ?? ''} placeholder="1" slotProps={{ htmlInput: { step: 0.05, min: 0, max: 1 } }}
+          onChange={(e) => setStyle('opacity', e.target.value === '' ? undefined : Math.min(1, Math.max(0, Number(e.target.value))))} />
+        {!!cs.borderWidth && <ModeColours what="Border colour" light={cs.borderColor ?? 'divider'} dark={cs.borderColorDark ?? ''} onLight={(v) => setStyle('borderColor', v)} onDark={(v) => setStyle('borderColorDark', v)} list={theme.colors} sw={sw} noLight />}
       </Section>
 
+      {addingState && <AddState node={node} onClose={() => setAddingState(false)} />}
       {saving && <SaveAs node={node} onClose={() => setSaving(false)} />}
       <IconPicker open={picking} onClose={() => setPicking(false)} onPick={(f) => setProp('icon', f)} />
     </Box>

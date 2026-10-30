@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { get, set } from 'idb-keyval'
 import { cloneNew, contains, find, insertAt, parentOf, remove, setLayout, uid, update, walk } from './model/tree'
-import { defaultTheme, fixTheme, isTheme, type Theme } from './model/theme'
+import { defaultTheme, fixTheme, isTheme, syncSurfaces, type Theme } from './model/theme'
 import { KIND_RANK, type Breakpoint, type DesignNode, type Kind, type LayoutKey, type LibraryItem } from './model/types'
 import { OUT_OF_BOX, oobById } from './model/library'
 import { rem } from './model/rem'
@@ -16,13 +16,14 @@ export interface State {
   bp: Breakpoint
   view: 'design' | 'theme'
   editing: string | null // designer library item being edited
+  editState: string | null // state being edited on the selected node (null = default look)
 }
 
 const p1 = { top: rem(1), right: rem(1), bottom: rem(1), left: rem(1) }
 const initial = (): State => ({
   page: { id: 'page', name: 'Page', type: 'container', layout: { base: { direction: 'column', gap: rem(1), padding: p1, width: { mode: 'fill' } } } },
   library: [], themes: [defaultTheme()], activeThemeId: 'material', mode: 'light',
-  selection: [], bp: 'mobile', view: 'design', editing: null,
+  selection: [], bp: 'mobile', view: 'design', editing: null, editState: null,
 })
 
 let state: State = initial()
@@ -102,11 +103,39 @@ function setRoot(s: State, root: DesignNode): State {
 // ---- design actions ----
 export const select = (id: string | null, additive = false) =>
   setState((s) => {
-    if (id === null) return { ...s, selection: [] }
-    if (!additive) return { ...s, selection: [id] }
-    return { ...s, selection: s.selection.includes(id) ? s.selection.filter((x) => x !== id) : [...s.selection, id] }
+    if (id === null) return { ...s, selection: [], editState: null }
+    if (!additive) return { ...s, selection: [id], editState: s.selection.length === 1 && s.selection[0] === id ? s.editState : null }
+    return { ...s, selection: s.selection.includes(id) ? s.selection.filter((x) => x !== id) : [...s.selection, id], editState: null }
   })
-export const selectMany = (ids: string[]) => setState((s) => ({ ...s, selection: ids }))
+export const selectMany = (ids: string[]) => setState((s) => ({ ...s, selection: ids, editState: null }))
+export const setEditState = (id: string | null) => setState((s) => ({ ...s, editState: id }))
+
+// ---- states: any node can have them ----
+export function addNodeState(nodeId: string, name: string, kind: import('./model/types').StateKind): string | null {
+  let err: string | null = null
+  setState((s) => {
+    const root = getRoot(s)
+    const n = find(root, nodeId)
+    if (!n) return s
+    if (!name.trim()) { err = 'Name is required.'; return s }
+    const taken = (n.states ?? []).map((x) => x.id)
+    const base = name.trim().replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase() || 'state'
+    let id = kind === 'custom' ? base : kind, i = 2
+    if (kind !== 'custom' && taken.includes(kind)) { err = `This item already has a ${kind} state.`; return s }
+    while (taken.includes(id)) id = `${base}-${i++}`
+    return { ...setRoot(s, update(root, nodeId, (x) => ({ ...x, states: [...(x.states ?? []), { id, name: name.trim(), kind, style: {} }] }))), editState: id }
+  })
+  return err
+}
+export function updateNodeState(nodeId: string, stateId: string, fn: (st: import('./model/types').NodeState) => import('./model/types').NodeState) {
+  setState((s) => setRoot(s, update(getRoot(s), nodeId, (n) => ({ ...n, states: (n.states ?? []).map((x) => (x.id === stateId ? fn(x) : x)) }))))
+}
+export function deleteNodeState(nodeId: string, stateId: string) {
+  setState((s) => ({ ...setRoot(s, update(getRoot(s), nodeId, (n) => ({
+    ...n, states: (n.states ?? []).filter((x) => x.id !== stateId),
+    props: n.props?.state === stateId ? { ...n.props, state: '' } : n.props,
+  }))), editState: null }))
+}
 export const setBp = (bp: Breakpoint) => setState((s) => ({ ...s, bp }))
 export const setView = (view: State['view']) => setState((s) => ({ ...s, view }))
 export const setMode = (mode: State['mode']) => setState((s) => ({ ...s, mode }))
@@ -273,7 +302,7 @@ export const renameLibraryItem = (id: string, name: string) =>
 
 // ---- theme actions ----
 export const updateTheme = (fn: (t: Theme) => Theme) =>
-  setState((s) => ({ ...s, themes: s.themes.map((t) => (t.id === s.activeThemeId ? fn(t) : t)) }))
+  setState((s) => ({ ...s, themes: s.themes.map((t) => (t.id === s.activeThemeId ? syncSurfaces(fn(t)) : t)) }))
 export const setActiveTheme = (id: string) => setState((s) => ({ ...s, activeThemeId: id }))
 export function newTheme(name: string) {
   setState((s) => {
@@ -318,4 +347,4 @@ export function importProject(items: LibraryItem[], themes: Theme[]) {
 export { oobById }
 
 // dev-only handle used by automated visual checks
-if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__canvas = { getState, setState, addItem, select, updateNode, setLayoutProp, updateTheme, setView, setBp, setMode }
+if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__canvas = { addNodeState, updateNodeState, deleteNodeState, setEditState, getState, setState, addItem, select, updateNode, setLayoutProp, updateTheme, setView, setBp, setMode }

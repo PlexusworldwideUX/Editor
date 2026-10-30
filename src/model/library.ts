@@ -60,7 +60,7 @@ const N = (type: DesignNode['type'], props: DesignNode['props'], layout: LayoutP
 register('element', 'container', 'Container', () => ({ ...N('container', undefined, { direction: 'column', gap: rem(1), padding: p(1) }) }))
 register('element', 'row', 'Row', () => N('container', undefined, { direction: 'row', gap: rem(1), alignY: 'center', padding: p(1) }))
 register('element', 'text', 'Text', () => N('text', { text: 'Text', variant: 'body1' }, { width: FILL }))
-register('element', 'button', 'Button', () => N('button', { text: 'Button', variant: 'contained', color: 'primary', size: 'medium' }))
+register('element', 'button', 'Button', () => N('button', { text: 'Button', buttonStyle: 'primary', size: 'medium' }))
 register('element', 'icon', 'Icon', () => N('icon', { icon: 'Home', size: rem(1.5) }))
 register('element', 'divider', 'Divider', () => N('container', undefined, { width: FILL, height: { mode: 'fixed', value: rem(0.0625) } }, { fill: 'divider' }))
 register('element', 'image', 'Image', () => N('image', { src: PLACEHOLDER_IMG, alt: 'Image', fit: 'cover' }, { width: FILL, height: { mode: 'fixed', value: rem(12) } }, { radius: 'control' }))
@@ -119,7 +119,7 @@ register('component', 'list-item', 'List item', (use) =>
 register('component', 'button-group', 'Button group', (use) =>
   use('row', { layout: { padding: p(0), gap: rem(1) }, children: [
     use('button', { props: { text: 'Primary action' } }),
-    use('button', { props: { text: 'Secondary', variant: 'outlined' } }),
+    use('button', { props: { text: 'Secondary', buttonStyle: 'outline' } }),
   ] }))
 register('component', 'tag-list', 'Tag list', (use) =>
   use('row', { layout: { padding: p(0), gap: rem(0.5), wrap: true, width: FILL }, children: [

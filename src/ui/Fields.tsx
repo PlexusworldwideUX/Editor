@@ -94,8 +94,8 @@ export function AlignMatrix({ x, y, onChange }: { x: 'start' | 'center' | 'end';
 export interface Swatch { value: string; label: string; color: string }
 
 /** Colour chooser that shows the current swatch and every available choice as swatches. */
-export function SwatchSelect({ label, value, options, onChange, allowNone = true }: {
-  label: string; value: string; options: Swatch[]; onChange: (v: string) => void; allowNone?: boolean
+export function SwatchSelect({ label, value, options, onChange, allowNone = true, noneLabel = 'None' }: {
+  label: string; value: string; options: Swatch[]; onChange: (v: string) => void; allowNone?: boolean; noneLabel?: string
 }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
   const cur = options.find((o) => o.value === value)
@@ -113,14 +113,14 @@ export function SwatchSelect({ label, value, options, onChange, allowNone = true
         {chip(cur?.color ?? null, false)}
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.2 }}>{label}</Typography>
-          <Typography variant="body2" noWrap color={value && !cur ? 'error' : undefined}>{cur?.label ?? (value ? `${value} (not allowed here)` : 'None')}</Typography>
+          <Typography variant="body2" noWrap color={value && !cur ? 'error' : undefined}>{cur?.label ?? (value ? `${value} (not allowed here)` : noneLabel)}</Typography>
         </Box>
         <ArrowDropDown fontSize="small" />
       </Box>
       <Menu anchorEl={anchor} open={!!anchor} onClose={() => setAnchor(null)} slotProps={{ paper: { sx: { p: 1.5, width: '16rem' } } }} MenuListProps={{ disablePadding: true }}>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
           {allowNone && (
-            <Box title="None" onClick={() => { onChange(''); setAnchor(null) }} sx={{ cursor: 'pointer' }}>
+            <Box title={noneLabel} onClick={() => { onChange(''); setAnchor(null) }} sx={{ cursor: 'pointer' }}>
               <Box sx={{ transform: 'scale(1.5)', m: 0.5 }}>{chip(null, !value)}</Box>
             </Box>
           )}
@@ -130,7 +130,7 @@ export function SwatchSelect({ label, value, options, onChange, allowNone = true
             </Box>
           ))}
         </Box>
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>{cur ? `${cur.label} ${cur.color}` : 'None'}</Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>{cur ? `${cur.label} ${cur.color}` : noneLabel}</Typography>
       </Menu>
     </>
   )
